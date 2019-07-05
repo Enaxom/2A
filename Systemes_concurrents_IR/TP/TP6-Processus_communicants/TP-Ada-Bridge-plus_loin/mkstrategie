@@ -1,0 +1,145 @@
+#!/bin/sh
+# 11/14
+
+actuelle=vrai
+if [ $# -gt 1 ]
+then
+	echo 'usage : mkstrategie [-i]'
+	exit 1
+elif [ $# -eq 1 ]
+then
+	if  [ $1 != '-i' ]
+	then
+		echo 'usage : mkstrategie [-i]'
+		exit 1
+	else
+		cible=""
+		for f in *
+		do
+			if expr $f : 'bridge-synchro-[^.]*\.ads' > /dev/null
+			then
+				cible=$cible`expr $f : 'bridge-synchro-\([^.]*\)\.ads'`" "
+			fi
+		done
+		
+		if [ -z "$cible" ]
+		then
+			echo 'Pas de paquetage conforme.'
+			echo 'Les paquetages décrivant une stratégie doivent avoir une spécification'\
+			'nommée "bridge-synchro-<nom_stratégie>.ads".'
+			echo 'Le script mkstrategie et les paquetages décrivant les stratégies doivent'\
+			"être dans le même répertoire, avec les différents paquetages de l'application."
+			echo 'Le répertoire contenant le script mkstrategie doit au moins contenir'\
+			"la définition et l'implantation de la stratégie vide"\
+			'(fichiers "bridge-synchro-vide.adb" et "bridge-synchro-vide.ads").'
+		else					
+			reponse=999999
+			nbpaq=`echo $cible | wc -w`
+			nbpaq=`expr $nbpaq + 2`
+			while [ $reponse -gt $nbpaq ]
+			do
+				liste=$cible
+				echo 'Choisir une stratégie :'
+				echo '-----------------------'
+				echo '  0) Pas de choix (Abandon)'
+				echo "  1) Création d'une nouvelle stratégie..."
+				echo '  2) Stratégie actuelle ('`cat bridge-synchro.adb | \
+				  grep 'with Bridge\.Synchro\.' | head -1 | cut -f 3 -d . | cut -f 1 -d \;`')'
+				i=3
+				while [ $i -le $nbpaq ]
+				do
+					strategie=`echo $liste | cut -f 1 -d " "`
+					liste=`echo $liste | cut -f 2- -d " "`
+					echo "  $i) "$strategie
+					i=`expr $i + 1`
+				done
+				read reponse
+				if [ -z "$reponse" ] || expr $reponse : '[^0-9]*' > /dev/null
+				then
+					reponse=999999
+				fi
+			done
+			case $reponse in
+				0) 	echo "Abandon : rien à compiler"
+					exit 2;;
+				1) 	reponse=""
+					while [ -z "$reponse" ]
+					do
+						echo 'Nom de la nouvelle stratégie (q pour abandonner)'
+						read reponse
+						if [ -n "$reponse" ]
+						then
+							alerte=""
+							if [ "$reponse" = "q" ]
+							then
+								message="Abandonner (o/n) ?"
+							else
+								message="Créer une nouvelle stratégie de nom "$reponse" (o/n) ?"
+								nomfic=bridge-synchro-`echo $reponse | tr '[:upper:]' '[:lower:]'`.ads
+								if [ -e $nomfic ]
+								then 
+									alerte='Attention ! Une stratégie de même nom a déja été définie'
+								fi
+							fi
+							rep=c
+							until expr "X$rep" : 'X[ONon].*' >/dev/null
+							do
+  								echo $alerte
+  								echo $message
+ 								read rep
+							done
+							if expr "$rep" : '[Nn].*' >/dev/null
+							then
+								reponse=""
+							fi
+						fi
+					done
+					if [ $reponse = 'q' ]
+					then
+						echo "Abandon : rien à compiler"
+						exit 3
+					else
+						cible=$reponse
+						radical=`echo $reponse | tr '[:upper:]' '[:lower:]'`
+						echo "création d'un fichier de spécification (bridge-synchro-"$radical".ads)"\
+						 "pour la stratégie "$reponse
+						cp bridge-synchro.ads bridge-synchro-$radical.ads
+						sed -i.old s/"\(package Bridge.Synchro\)\( *is\)"/"\1\.$reponse\2"/\
+						 	bridge-synchro-$radical.ads
+						sed -i.old s/"\(end Bridge.Synchro\)\(;\)"/"\1\.$reponse\2"/\
+						 	bridge-synchro-$radical.ads					 	
+						rm bridge-synchro-$radical.ads.old #pas trouvé la bonne option de sed
+						echo "création d'un fichier d'implémentation (bridge-synchro-"$radical".adb)"\
+						 "pour la stratégie "$reponse	
+						cp bridge-synchro-vide.adb bridge-synchro-$radical.adb
+						sed -i.old s/"\(package body Bridge.Synchro.\)\([^ ]*\)\( *is\)"/"\1$reponse\3"/\
+						 	bridge-synchro-$radical.adb
+						sed -i.old s/"\(end Bridge.Synchro.\)\([^;]*\)\(;\)"/"\1$reponse\3"/\
+						 	bridge-synchro-$radical.adb						 	
+						rm bridge-synchro-$radical.adb.old
+						actuelle=faux 
+					fi ;;
+				2) 	;;
+				*) 	i=`expr $reponse - 2`
+					cible=`echo $cible | cut -f $i -d " "`
+					actuelle=faux ;;
+			esac
+		fi
+	fi
+fi
+
+# edition
+if [ $actuelle = 'vrai' ]
+then 
+	cible=`cat bridge-synchro.adb | head -1 | cut -f 3 -d . | cut -f 1 -d \;`
+else
+	radical=`echo $cible | tr '[:upper:]' '[:lower:]'`
+	nom=`cat bridge-synchro-"$radical".ads | grep "package Bridge.Synchro." | cut -f 3 -d . | cut -f 1 -d ' '`
+	echo "Edition du fichier bridge-synchro.adb pour la stratégie "$nom
+	sed -i.old s/"\(Bridge\.Synchro\.\)\([^;]*\)\(;.*-- XXXX\)"/"\1$nom\3"/ bridge-synchro.adb
+	rm bridge-synchro.adb.old
+fi
+
+# compilation
+echo "compilation pour $cible"
+/usr/bin/gnatmake bridge-main `gtkada-config`
